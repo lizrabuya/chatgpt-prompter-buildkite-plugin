@@ -61,18 +61,74 @@ function plugin_read_config() {
   echo "${!var:-$default}"
 }
 
+function validate_bk_token() {
+  local bk_api_token="$1" 
+
+  # Check if the BK API token is valid
+  if [ -z "${bk_api_token}" ]; then
+    echo "❌ Error: Missing Buildkite API token."
+    return 1
+  fi
+
+  #validate token scope
+  response=$(curl -H "Authorization: Bearer ${bk_api_token}" \
+    -X GET "https://api.buildkite.com/v2/access-token")
+  
+  #check if response is 200
+  if [ $? -ne 0 ]; then
+    echo "❌ Error: Invalid Buildkite API token. Please check the token configured in your cluster secrets."
+    return 1
+  fi
+  #check if response is empty
+  if [ -z "${response}" ]; then
+    echo "❌ Error: Failed to validate the Buildkite API token provided."
+    return 1
+  fi
+
+  if ! echo "${response}" | jq -e '.scopes' > /dev/null; then
+    echo "❌ Error: Failed to validate the scope of the Buildkite API token provided."
+    return 1
+  fi 
+
+  scopes=$(echo "${response}" | jq -r '.scopes[]')   
+  if [[ "${scopes}" =~ write ]]; then
+    echo "Scopes: ${scopes}"  
+    echo "❌ Error: The Buildkite API token has write permissions which are not allowed to use in this plugin for security reasons."
+    return 1
+  fi
+  echo "✅ Buildkite API token is valid and has appropriate read-only scopes."
+  return 0
+}
+
+function get_current_build_information() {  
+  local bk_api_token="$1"
+  
+  # Fetch build information from Buildkite API
+  response=$(curl -s -f -X GET "https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_NUMBER}" \
+    -H "Authorization: Bearer ${bk_api_token}" \
+    -H "Content-Type: application/json" 2>/dev/null) 
+
+  # Check if curl failed
+  if [ $? -ne 0 ]; then
+    echo ""
+    return
+  fi
+
+  echo "${response}"
+}
+ 
 function send_prompt() {
   local api_secret_key="$1"
   local model="$2"
   local user_prompt="$3"
-  local system_prompt="$4"
+  local build_info="$4"
 
   local prompt_payload
   #check if user_prompt is equal to "ping"
   if [ "${user_prompt}" == "ping" ]; then
     prompt_payload=$(ping_payload "${model}")
   else
-    prompt_payload=$(format_payload "${model}" "${user_prompt}" "${system_prompt}")
+    prompt_payload=$(format_payload "${model}" "${user_prompt}" "${build_info}")
   fi
   # Call the OpenAI API
   response=$(call_openapi_chatgpt "${api_secret_key}"  "${prompt_payload}")
@@ -173,34 +229,28 @@ function call_openapi_chatgpt() {
 
 function format_payload() {
   local model="$1"
-  local user_prompt="$2"
-  local system_prompt="$3"
+  local custom_prompt="$2"
+  local build_info="$3"
+  local base_prompt="You are an expert software engineer and DevOps specialist specialising in Buildkite. Please provide a detailed analysis of the build information provided."
 
   local payload
-  if [ -z "${system_prompt}" ]; then
-      # Prepare the payload without system prompt
-      payload=$(jq -n \
-        --arg model "$model" \
-        --arg user_prompt "$user_prompt" \
-        '{
-          model: $model,
-          messages: [
-            { role: "user", content: $user_prompt }
-          ] 
-        }')
-    else
-      # Prepare the payload with system prompt
-      payload=$(jq -n \
-        --arg model "$model" \
-        --arg user_prompt "$user_prompt" \
-        --arg system_prompt "$system_prompt" \
-        '{
-          model: $model,
-          messages: [
-            { role: "system", content: $system_prompt },
-            { role: "user", content: $user_prompt }
-          ]
-        }')
-    fi
+  # check if user prompt is not empty, append to default prompt "you are an expert."  
+  if [ -n "${custom_prompt}" ]; then
+      base_prompt="${base_prompt} ${custom_prompt}"
+  fi 
+
+  # Prepare the payload with prompt
+  payload=$(jq -n \
+    --arg model "$model" \
+    --arg system_prompt "$base_prompt" \
+    --arg build_info "$build_info" \
+     '{
+      model: $model,
+      messages: [
+        { role: "system", content: $system_prompt },
+        { role: "user", content: $build_info }
+      ]
+    }') 
+
     echo "$payload"
 }
