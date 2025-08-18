@@ -153,21 +153,6 @@ function validate_bk_token() {
   return 0
 }
 
-function get_current_build_information() {  
-  local bk_api_token="$1"
-  
-  # Fetch build information from Buildkite API
-  response=$(curl -s -f -X GET "https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_NUMBER}" \
-    -H "Authorization: Bearer ${bk_api_token}" \
-    -H "Content-Type: application/json" 2>/dev/null) 
-
-  # Check if curl failed
-  if [ $? -ne 0 ]; then
-    echo ""
-    return
-  fi
-  echo "${response}"
-}
  
 function send_prompt() {
   local api_secret_key="$1"
@@ -307,6 +292,27 @@ function format_payload() {
     echo "$payload"
 }
 
+
+function get_current_build_information() {  
+  local bk_api_token="$1"
+   
+  
+  # Fetch build information from Buildkite API
+  response=$(curl -s -f -X GET "https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_NUMBER}" \
+    -H "Authorization: Bearer ${bk_api_token}" \
+    -H "Content-Type: application/json" 2>/dev/null) 
+
+  # Check if curl failed
+  if [ $? -ne 0 ]; then
+    echo ""
+    return
+  fi
+  echo "${response}"
+}
+
+
+
+
 function get_user_content() {
   local bk_api_token="$1"
 
@@ -327,37 +333,55 @@ function generate_build_info() {
   local bk_api_token="$1"
   local analysis_level="$2"
 
-  local build_info="Build: ${BUILDKITE_PIPELINE_SLUG} #${BUILDKITE_BUILD_NUMBER}\n
-Build Label: ${BUILDKITE_MESSAGE:-Unknown}\n
-Build URL: ${BUILDKITE_BUILD_URL:-Unknown}\n"  
+  local build_info="Build: ${BUILDKITE_PIPELINE_SLUG} #${BUILDKITE_BUILD_NUMBER}
+Build Label: ${BUILDKITE_MESSAGE:-Unknown}
+Build URL: ${BUILDKITE_BUILD_URL:-Unknown}
+Job: ${BUILDKITE_LABEL:-Unknown}
+Command: ${BUILDKITE_COMMAND:-Unknown}
+Command Exit status: ${BUILDKITE_COMMAND_EXIT_STATUS:-0}
+Build Source: ${BUILDKITE_SOURCE:-Unknown}"  
+
+  if [ "${BUILDKITE_SOURCE}" == "trigger_job" ]; then
+    build_info="${build_info}
+Triggered from pipeline: ${BUILDKITE_TRIGGERED_FROM_BUILD_PIPELINE_SLUG:-Unknown}
+Triggered from build: ${BUILDKITE_TRIGGERED_FROM_BUILD_NUMBER:-Unknown}"
+  fi
 
   log_section "Build Information"
   # Check if Buildkite API token is provided
-  if [ -z "${bk_api_token}" ]; then
-    # Default to a step level or command step to be passed for prompt analysis
-    echo "Generating content from current step information ..."
-    build_info="${build_info}
-Job: ${BUILDKITE_LABEL:-Unknown}\n
-Command: ${BUILDKITE_COMMAND:-Unknown}\n
-Command Exit status: ${BUILDKITE_COMMAND_EXIT_STATUS:-0}\n
-Build Source: ${BUILDKITE_SOURCE:-Unknown}\n"
+  if [ -n "${bk_api_token}" ]; then
+    if [ "${analysis_level}" == "step" ] && [ -n "${BUILDKITE_JOB_ID}" ]; then
+      # Generate step-level build information
+      local job_logs_raw="/tmp/job_${BUILDKITE_JOB_ID}_raw.json"
+      local job_url="https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_NUMBER}/jobs/${BUILDKITE_JOB_ID}/log"
 
-    if [ "${BUILDKITE_SOURCE}" == "trigger_job" ]; then
-      build_info="${build_info}
-Triggered from pipeline: ${BUILDKITE_TRIGGERED_FROM_BUILD_PIPELINE_SLUG:-Unknown}\n
-Triggered from build: ${BUILDKITE_TRIGGERED_FROM_BUILD_NUMBER:-Unknown}\n"
-    fi
+      if curl -s -f -H "Authorization: Bearer ${api_token}" "${job_url}" > "${job_logs_raw}" 2>/dev/null; then
+        local job_logs_cleaned="/tmp/job_${BUILDKITE_JOB_ID}_cleaned.json"
+        sed -E '
+    s/\\u001B_bk;t=[0-9]+\\u0007//g
+    s/\\u001B\[[0-9;]*m//g
+    s/\\r\\n/\n/g
+    s/\\r/\n/g
+    s/\\n/\n/g
+' "$job_logs_raw" > "$job_logs_cleaned"
+
+        local content, started_at, finished_at   
+        content=$(jq -r '.content //empty' "$job_logs_cleaned" 2>/dev/null)
+        if [ -n "${content}" ]; then
+          build_info="${build_info}  
+Job Logs: ${content}"
+        fi
+
+        rm -f "${job_logs_raw}"
+        rm -f "${job_logs_cleaned}"
+      fi
+
+    else
+      # Generate build-level information
+      echo "Generating build-level information ..."
+    fi 
   fi
 
-  if [ "${analysis_level}" == "step" ]; then
-    # Generate step-level build information
-    echo "Generating step-level build information ..."
-  else
-    # Generate build-level information
-    echo "Generating build-level information ..."
-  fi 
-
   echo "${build_info}"
-  echo -e "### ChatGPT Analysis\n"  | buildkite-agent annotate  --style "info" --context "chatgpt-analyse"    
-  echo -e "${build_info}"  | buildkite-agent annotate  --style "info" --context "chatgpt-analyse" --append
+  log_section_end "Build Information"
 }
