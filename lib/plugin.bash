@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/logger.bash" 
+
 PLUGIN_PREFIX="CHATGPT_PROMPTER"
 
 # Reads either a value or a list from the given env prefix
@@ -318,4 +320,43 @@ function get_user_content() {
     content=$(get_current_build_information "${bk_api_token}")   
   fi 
   echo "${content}"
+}
+
+
+function generate_build_info() {
+  local bk_api_token="$1"
+  local analysis_level="$2"
+
+  local build_info="Build: ${BUILDKITE_PIPELINE_SLUG} #${BUILDKITE_BUILD_NUMBER}
+Build Label: ${BUILDKITE_MESSAGE:-Unknown}
+Build URL: ${BUILDKITE_BUILD_URL:-Unknown}"  
+
+  log_section "Build Information"
+  # Check if Buildkite API token is provided
+  if [ -z "${bk_api_token}" ]; then
+    # Default to a step level or command step to be passed for prompt analysis
+    echo "Generating content from current step information ..."
+    build_info="${build_info}
+Job: ${BUILDKITE_LABEL:-Unknown}
+Command: ${BUILDKITE_COMMAND:-Unknown}
+Command Exit status: ${BUILDKITE_COMMAND_EXIT_STATUS:-0}
+Build Source: ${BUILDKITE_SOURCE:-Unknown}"
+
+    if [ "${BUILDKITE_SOURCE}" == "trigger_job" ]; then
+      build_info="${build_info}
+Triggered from pipeline: ${BUILDKITE_TRIGGERED_FROM_BUILD_PIPELINE_SLUG:-Unknown}
+Triggered from build: ${BUILDKITE_TRIGGERED_FROM_BUILD_NUMBER:-Unknown}"
+    fi
+  fi
+
+  if [ "${analysis_level}" == "step" ]; then
+    # Generate step-level build information
+    echo "Generating step-level build information ..."
+  else
+    # Generate build-level information
+    echo "Generating build-level information ..."
+  fi 
+
+  echo -e "### ChatGPT Analysis\n"  | buildkite-agent annotate  --style "info" --context "chatgpt-analyse"    
+  echo -e "${build_info}"  | buildkite-agent annotate  --style "info" --context "chatgpt-analyse" --append
 }

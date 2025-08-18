@@ -24,6 +24,7 @@ fi
 echo "Retrieving other plugin configurations ..."
 # Load Plugin configuration
 BUILDKITE_API_TOKEN=$(get_bk_api_token) 
+ANALYSIS_LEVEL=$(plugin_read_config ANALYSIS_LEVEL "step")
 MODEL=$(plugin_read_config MODEL "gpt-4o-mini")
 CUSTOM_PROMPT=$(plugin_read_config CUSTOM_PROMPT "")
 
@@ -33,7 +34,6 @@ echo "Using Custom Prompt: ${CUSTOM_PROMPT:-}"
 # validating buildkite token
 validate_bk_token "${BUILDKITE_API_TOKEN}" || exit 1
 
-# Send the prompt to ChatGPT
-echo "Sending build information to ChatGPT for analysis  ..."
-send_prompt "${API_KEY}" "${MODEL}" "${CUSTOM_PROMPT}" "${BUILDKITE_API_TOKEN}"  
+# verify build information
+generate_build_info "${BUILDKITE_API_TOKEN}" "${ANALYSIS_LEVEL}"
 echo "~~~ Done."
