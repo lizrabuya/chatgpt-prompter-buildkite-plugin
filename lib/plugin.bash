@@ -327,9 +327,9 @@ function generate_build_info() {
   local bk_api_token="$1"
   local analysis_level="$2"
 
-  local build_info="Build: ${BUILDKITE_PIPELINE_SLUG} #${BUILDKITE_BUILD_NUMBER}
-Build Label: ${BUILDKITE_MESSAGE:-Unknown}
-Build URL: ${BUILDKITE_BUILD_URL:-Unknown}"  
+  local build_info="Build: ${BUILDKITE_PIPELINE_SLUG} #${BUILDKITE_BUILD_NUMBER}\n
+Build Label: ${BUILDKITE_MESSAGE:-Unknown}\n
+Build URL: ${BUILDKITE_BUILD_URL:-Unknown}\n"  
 
   log_section "Build Information"
   # Check if Buildkite API token is provided
@@ -337,15 +337,15 @@ Build URL: ${BUILDKITE_BUILD_URL:-Unknown}"
     # Default to a step level or command step to be passed for prompt analysis
     echo "Generating content from current step information ..."
     build_info="${build_info}
-Job: ${BUILDKITE_LABEL:-Unknown}
-Command: ${BUILDKITE_COMMAND:-Unknown}
-Command Exit status: ${BUILDKITE_COMMAND_EXIT_STATUS:-0}
-Build Source: ${BUILDKITE_SOURCE:-Unknown}"
+Job: ${BUILDKITE_LABEL:-Unknown}\n
+Command: ${BUILDKITE_COMMAND:-Unknown}\n
+Command Exit status: ${BUILDKITE_COMMAND_EXIT_STATUS:-0}\n
+Build Source: ${BUILDKITE_SOURCE:-Unknown}\n"
 
     if [ "${BUILDKITE_SOURCE}" == "trigger_job" ]; then
       build_info="${build_info}
-Triggered from pipeline: ${BUILDKITE_TRIGGERED_FROM_BUILD_PIPELINE_SLUG:-Unknown}
-Triggered from build: ${BUILDKITE_TRIGGERED_FROM_BUILD_NUMBER:-Unknown}"
+Triggered from pipeline: ${BUILDKITE_TRIGGERED_FROM_BUILD_PIPELINE_SLUG:-Unknown}\n
+Triggered from build: ${BUILDKITE_TRIGGERED_FROM_BUILD_NUMBER:-Unknown}\n"
     fi
   fi
 
@@ -357,6 +357,7 @@ Triggered from build: ${BUILDKITE_TRIGGERED_FROM_BUILD_NUMBER:-Unknown}"
     echo "Generating build-level information ..."
   fi 
 
+  echo "${build_info}"
   echo -e "### ChatGPT Analysis\n"  | buildkite-agent annotate  --style "info" --context "chatgpt-analyse"    
   echo -e "${build_info}"  | buildkite-agent annotate  --style "info" --context "chatgpt-analyse" --append
 }
